@@ -1,0 +1,140 @@
+---
+title: "Sensitivity to prior information of Bayesian estimates of ability parameters in binary IRT models"
+title-block-banner: true
+description: |
+  A simple simulation exercise is used to explore the sensitivty of Bayesian estimates of ability parameters in IRT models to different levels of prior precision.   As the prior precision $\rightarrow 0$, Bayes estimates tend towards the MLEs, which are unbounded for subjects with no variation in their binary responses to the test items.
+date: now
+date-format: "h:mmA D MMMM YYYY"
+author:
+  - name: "Professor Simon Jackman"
+    orcid: 0000-0001-7421-4034
+    affiliation: "University of Sydney"
+    email: "simonjackman@icloud.com"
+    url: https://simonjackman.netlify.app
+##website:
+##  google-analytics: 'G-DD0XG6JZDH'
+format:
+  html:
+    theme: cosmo
+    mainfont: Avenir
+    fontsize: 16px
+    toc: true
+    number-sections: false
+    fig-width: 6.5
+    fig-height: 6.5
+    code-fold: true
+    code-summary: "Reveal code"
+    code-tools: true
+    code-copy: true
+    smooth-scroll: true
+    self-contained: true
+tbl-cap-location: bottom    
+crossref:
+  tbl-title: Table
+execute:
+  keep-md: false
+  warning: false
+  error: false
+---
+
+```{r}
+
+```
+
+
+# Simulation design
+
+```{r}
+n <- 500
+m <- 22
+x0 <- seq(-2, 2, length = n)  ## true ideal points
+cutpoints <- seq(-1.5, 1.5, length = m)
+beta <- 1
+```
+
+- `r n` subjects with ability parameters (or ideal points) $x_i$ uniformly spaced between -2 and 2.
+
+- `r m` items with cutpoints $\alpha_j$ uniformly spaced between -1.5 and 1.5.
+
+- discrimination parameter $\beta_j$ set to `r beta` $\forall\ j$.
+
+- Generative model is $y_{ij} \sim \text{Bernoulli}(p_{ij}), \, p_{ij} = \Phi[\beta_j(x_i - \alpha_j)]$.
+
+```{r}
+set.seed(314159)
+y <- matrix(NA, n, m)
+for (j in 1:m) {
+  p <- pnorm(q = beta*(x0 - cutpoints[j]))
+  for (i in 1:n) {
+    y[i, j] <- rbinom(n = 1,
+                      size = 1,
+                      prob = p[i])
+  }
+}
+```
+
+Distribution of sum correct out of `r m` items across the `r n` subjects:
+```{r}
+table(apply(y,1,sum))
+```
+
+# Fit ideal point models
+
+We fit a sequence of ideal point models, varying the prior variance on the ideal point parameters over the sequence $\lambda \in \{ 1, 2, 5, 10, 25, 50, 100 \}$ such that _a priori_ $x_i \sim N(0, \lambda)$.
+
+Other than varying the prior variance of the ideal points we use the default priors and program options in `ideal` from the `pscl` R package.  We save the MCMC-based Bayes estimates of the ideal points (the mean of the MCMC iterates for each ideal point, which is a Monte Carlo estimate of the mean of the posterior density for each ideal point).
+
+```{r}
+#| label: fit
+library(pscl)
+rc <- rollcall(y)
+lambda <- c(1,2,5,10,25,50)
+
+library(foreach)
+library(doMC)
+registerDoMC(8)
+z <- foreach(i = 1:length(lambda)) %dopar% {
+  ideal(rc,
+        thin = 10,
+        priors = list(xpv = 1/lambda[i]))$xbar
+}
+```
+
+```{r}
+library(tidyverse)
+names(z) <- lambda
+x <- lapply(z,as_tibble) %>% 
+  bind_rows(.,.id = "lambda") %>% 
+  mutate(lambda = ordered(as.numeric(lambda)))
+
+x_max <- max(abs(x$D1))
+
+prior_data <- tidyr::expand_grid(lambda = lambda,
+                                 x = seq(-x_max,x_max,length = 1001)) %>% 
+  mutate(y=dnorm(x,sd=sqrt(lambda))) %>% 
+  mutate(lambda = ordered(as.numeric(lambda)))
+```
+
+# Inspection
+
+The following graph shows histograms summarising the distribution of the `r n` estimated ideal points at each value of $\lambda$.   The red curve shows the prior used in each case.  As the prior on the ideal points gets more diffuse, the ideal points become more dispersed, with extreme values tending to the MLEs at $\pm \infty$; indeed, inspection of the posterior densities for the ideal points of subjects with little or no variation in their binary responses would reveal these densities to be skewed in the direction of the unbounded MLEs, the normal prior shrinking the posterior densities back towards zero. 
+
+```{r}
+#| label: lambda
+library(ggplot2)
+ggplot(x,aes(x = D1)) + 
+  geom_histogram(aes(y = after_stat(density))) + 
+  geom_line(data=prior_data,aes(x=x,y=y),col="red") + 
+  facet_wrap(~lambda) + 
+  scale_y_continuous("Density",breaks = NULL,minor_breaks = NULL) + 
+  scale_x_continuous("Ideal point (posterior mean)") +
+  theme_minimal()
+```
+
+# Remarks
+
+- The relatively small number of items used in this simulation exercise, `r m`, tends to exacerbate the sensitivity of Bayes estimates to the prior.  More items generally provides more information about each ideal point if the accompanying cutpoints induce finer partitions of the subjects on the latent dimension.  
+
+- This latter observation motivates the optimal design of standardised tests and attitudinal batteries on surveys.   
+
+- The processes generating cutpoints and the resulting distribution of cutpoints (and the properties of the recovered ideal points) is a key differences between the IRT _locus classicus_ in educational testing setting and fitting the IRT model to roll call data produced by legislatures.       
